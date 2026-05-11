@@ -1,0 +1,17 @@
+node_modules/
+.turbo/
+.env
+.env.local
+.env*.local
+dist/
+.next/
+out/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/.env
+
+# OS
+.DS_Store

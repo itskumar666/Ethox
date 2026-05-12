@@ -15,8 +15,13 @@ contract PolicyGuardTest is Test {
     address constant SAFE = address(0xBEEF);
 
     function _setupPolicy(uint256 threshold, bool active) internal {
+        _setupPolicyWithDrain(threshold, 10000, active);  // 10000 = 100% = no drain limit
+    }
+
+    function _setupPolicyWithDrain(uint256 threshold, uint16 drainBps, bool active) internal {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: threshold,
+            drainBps: drainBps,
             active: active
         });
         vm.prank(SAFE);
@@ -51,6 +56,7 @@ contract PolicyGuardTest is Test {
     // ─── Normal operation ─────────────────────────────────────────────────────
 
     function test_AllowedTx_DoesNotRevert() public {
+        deal(SAFE, 100 ether);
         _setupPolicy(1 ether, true);
         // No revert expected
         _callCheckTx(SAFE, address(0xCAFE), 0.5 ether, Enum.Operation.Call);
@@ -141,7 +147,7 @@ contract PolicyGuardTest is Test {
         address safeB = address(0xBBBB);
 
         // Only safeA has active protection
-        PolicyStorage.Policy memory p = PolicyStorage.Policy({spendingThreshold: 1 ether, active: true});
+        PolicyStorage.Policy memory p = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, active: true});
         vm.prank(safeA);
         store.scheduleUpdate(p);
         vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);

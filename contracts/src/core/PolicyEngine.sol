@@ -78,6 +78,17 @@ contract PolicyEngine {
             return (Decision.RequireDelay, keccak256("THRESHOLD_EXCEEDED"));
         }
 
+        // Feature 2: Wallet drain protection
+        // Check if this transaction would drain more than X% of the account's balance.
+        // drainBps is in basis points: 4000 = 40%, 5000 = 50%, 10000 = 100%.
+        // Calculation: maxAllowed = (balance * drainBps) / 10000
+        // Integer division rounds down, which is conservative (in wallet's favor).
+        uint256 balance = ctx.account.balance;
+        uint256 maxDrain = (balance * policy.drainBps) / 10000;
+        if (ctx.value > maxDrain) {
+            return (Decision.RequireDelay, keccak256("DRAIN_LIMIT_EXCEEDED"));
+        }
+
         return (Decision.Allow, bytes32(0));
     }
 }

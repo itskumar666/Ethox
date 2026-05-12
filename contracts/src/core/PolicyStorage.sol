@@ -23,10 +23,14 @@ contract PolicyStorage {
     // ─── Types ────────────────────────────────────────────────────────────────
 
     struct Policy {
-        /// Maximum ETH value (wei) allowed per direct transaction.
+        /// Maximum ETH value (wei) allowed per direct transaction (Feature 1).
         /// type(uint256).max = no limit (default).
         /// 0 = block all ETH transfers.
         uint256 spendingThreshold;
+        /// Maximum % of balance allowed per transaction (Feature 2).
+        /// In basis points: 4000 = 40%, 5000 = 50%, 10000 = 100% (no limit).
+        /// Checked as: (tx.value * 10000 / account.balance) > drainBps → RequireDelay
+        uint16 drainBps;
         /// Protection is only enforced when active = true.
         /// Allows users to deploy the Guard without immediately enforcing rules.
         bool active;

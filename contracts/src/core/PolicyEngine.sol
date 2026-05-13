@@ -89,6 +89,13 @@ contract PolicyEngine {
             return (Decision.RequireDelay, keccak256("DRAIN_LIMIT_EXCEEDED"));
         }
 
+        // Feature 3: Unknown contract protection
+        // If blockUnknownContracts is enabled, check if we've seen this contract before.
+        // First interaction with a new contract requires delay/confirmation.
+        if (policy.blockUnknownContracts && !POLICY_STORAGE.isContractKnown(ctx.account, ctx.to)) {
+            return (Decision.RequireDelay, keccak256("UNKNOWN_CONTRACT"));
+        }
+
         return (Decision.Allow, bytes32(0));
     }
 }

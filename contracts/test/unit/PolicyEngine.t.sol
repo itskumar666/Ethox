@@ -22,6 +22,7 @@ contract PolicyEngineTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: threshold,
             drainBps: drainBps,
+            blockUnknownContracts: false,
             active: active
         });
         vm.prank(SAFE);
@@ -187,6 +188,7 @@ contract PolicyEngineTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: 10 ether,
             drainBps: 4000,  // 40%
+            blockUnknownContracts: false,
             active: true
         });
         vm.prank(SAFE);
@@ -208,6 +210,7 @@ contract PolicyEngineTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
             drainBps: 1,  // 0.01%
+            blockUnknownContracts: false,
             active: true
         });
         vm.prank(SAFE);
@@ -238,6 +241,7 @@ contract PolicyEngineTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
             drainBps: bps,
+            blockUnknownContracts: false,
             active: true
         });
         vm.prank(SAFE);
@@ -263,6 +267,7 @@ contract PolicyEngineTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
             drainBps: bps,
+            blockUnknownContracts: false,
             active: true
         });
         vm.prank(SAFE);
@@ -275,3 +280,93 @@ contract PolicyEngineTest is Test {
         assertEq(uint8(d), uint8(PolicyEngine.Decision.RequireDelay));
     }
 }
+
+    // ─── Feature 3: Unknown Contract Protection ────────────────────────────
+
+    function test_UnknownContract_RequiresDelay() public {
+        deal(SAFE, 100 ether);
+        PolicyStorage.Policy memory p = PolicyStorage.Policy({
+            spendingThreshold: type(uint256).max,
+            drainBps: 10000,
+            blockUnknownContracts: true,  // Feature 3 enabled
+            active: true
+        });
+        vm.prank(SAFE);
+        store.scheduleUpdate(p);
+        vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);
+        vm.prank(SAFE);
+        store.executeUpdate();
+
+        // First interaction with 0x1234 should trigger unknown-contract check
+        address unknownContract = address(0x1234);
+        (PolicyEngine.Decision d, bytes32 code) = engine.evaluate(
+            PolicyEngine.EvalContext({
+                account: SAFE,
+                to: unknownContract,
+                value: 0,
+                data: "",
+                operation: Enum.Operation.Call
+            })
+        );
+        assertEq(uint8(d), uint8(PolicyEngine.Decision.RequireDelay));
+        assertEq(code, keccak256("UNKNOWN_CONTRACT"));
+    }
+
+    function test_KnownContract_Allows() public {
+        deal(SAFE, 100 ether);
+        PolicyStorage.Policy memory p = PolicyStorage.Policy({
+            spendingThreshold: type(uint256).max,
+            drainBps: 10000,
+            blockUnknownContracts: true,
+            active: true
+        });
+        vm.prank(SAFE);
+        store.scheduleUpdate(p);
+        vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);
+        vm.prank(SAFE);
+        store.executeUpdate();
+
+        // Mark contract as known
+        address knownContract = address(0xABCD);
+        vm.prank(SAFE);
+        store.markContractKnown(knownContract);
+
+        // Now interaction should be allowed
+        (PolicyEngine.Decision d,) = engine.evaluate(
+            PolicyEngine.EvalContext({
+                account: SAFE,
+                to: knownContract,
+                value: 0,
+                data: "",
+                operation: Enum.Operation.Call
+            })
+        );
+        assertEq(uint8(d), uint8(PolicyEngine.Decision.Allow));
+    }
+
+    function test_UnknownContract_DisabledAllows() public {
+        deal(SAFE, 100 ether);
+        PolicyStorage.Policy memory p = PolicyStorage.Policy({
+            spendingThreshold: type(uint256).max,
+            drainBps: 10000,
+            blockUnknownContracts: false,  // Feature 3 disabled
+            active: true
+        });
+        vm.prank(SAFE);
+        store.scheduleUpdate(p);
+        vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);
+        vm.prank(SAFE);
+        store.executeUpdate();
+
+        // Even first interaction with unknown contract is allowed
+        (PolicyEngine.Decision d,) = engine.evaluate(
+            PolicyEngine.EvalContext({
+                account: SAFE,
+                to: address(0x9999),
+                value: 0,
+                data: "",
+                operation: Enum.Operation.Call
+            })
+        );
+        assertEq(uint8(d), uint8(PolicyEngine.Decision.Allow));
+    }

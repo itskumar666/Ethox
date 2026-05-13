@@ -31,6 +31,10 @@ contract PolicyStorage {
         /// In basis points: 4000 = 40%, 5000 = 50%, 10000 = 100% (no limit).
         /// Checked as: (tx.value * 10000 / account.balance) > drainBps → RequireDelay
         uint16 drainBps;
+        /// Block first interaction with unknown contracts (Feature 3).
+        /// If true: tx to a contract you haven't used before → RequireDelay
+        /// If false: first interaction is allowed
+        bool blockUnknownContracts;
         /// Protection is only enforced when active = true.
         /// Allows users to deploy the Guard without immediately enforcing rules.
         bool active;
@@ -49,6 +53,10 @@ contract PolicyStorage {
 
     /// account → pending (scheduled) policy change
     mapping(address => PendingUpdate) private _pending;
+
+    /// account → contract → has been seen
+    /// Used by Feature 3: track which contracts the account has interacted with
+    mapping(address => mapping(address => bool)) private _knownContracts;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -112,6 +120,25 @@ contract PolicyStorage {
         if (!_pending[msg.sender].exists) revert NoPendingUpdate();
         delete _pending[msg.sender];
         emit PolicyUpdateCancelled(msg.sender);
+    }
+
+    // ─── Contract tracking (Feature 3) ────────────────────────────────────────
+
+    /**
+     * @notice Mark a contract as "known" (seen before).
+     * @dev Called by PolicyGuard after a transaction executes successfully.
+     *      This way, the next interaction with the same contract won't trigger
+     *      the "unknown contract" warning.
+     */
+    function markContractKnown(address contract_) external {
+        _knownContracts[msg.sender][contract_] = true;
+    }
+
+    /**
+     * @notice Check if account has interacted with a contract before.
+     */
+    function isContractKnown(address account, address contract_) external view returns (bool) {
+        return _knownContracts[account][contract_];
     }
 
     // ─── View functions ───────────────────────────────────────────────────────

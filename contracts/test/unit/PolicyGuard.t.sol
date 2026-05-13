@@ -22,6 +22,7 @@ contract PolicyGuardTest is Test {
         PolicyStorage.Policy memory p = PolicyStorage.Policy({
             spendingThreshold: threshold,
             drainBps: drainBps,
+            blockUnknownContracts: false,
             active: active
         });
         vm.prank(SAFE);
@@ -50,7 +51,7 @@ contract PolicyGuardTest is Test {
     function setUp() public {
         store = new PolicyStorage();
         engine = new PolicyEngine(address(store));
-        guard = new PolicyGuard(address(engine));
+        guard = new PolicyGuard(address(engine), address(store));
     }
 
     // ─── Normal operation ─────────────────────────────────────────────────────
@@ -127,7 +128,12 @@ contract PolicyGuardTest is Test {
 
     function test_ZeroAddressEngine_Reverts() public {
         vm.expectRevert(PolicyGuard.ZeroAddressEngine.selector);
-        new PolicyGuard(address(0));
+        new PolicyGuard(address(0), address(store));
+    }
+
+    function test_ZeroAddressStorage_Reverts() public {
+        vm.expectRevert(PolicyGuard.ZeroAddressStorage.selector);
+        new PolicyGuard(address(engine), address(0));
     }
 
     // ─── checkAfterExecution ─────────────────────────────────────────────────
@@ -147,7 +153,7 @@ contract PolicyGuardTest is Test {
         address safeB = address(0xBBBB);
 
         // Only safeA has active protection
-        PolicyStorage.Policy memory p = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, active: true});
+        PolicyStorage.Policy memory p = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
         vm.prank(safeA);
         store.scheduleUpdate(p);
         vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);

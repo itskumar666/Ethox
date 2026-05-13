@@ -13,6 +13,7 @@ contract PolicyStorageTest is Test {
     PolicyStorage.Policy internal defaultPolicy = PolicyStorage.Policy({
         spendingThreshold: 1 ether,
         drainBps: 5000,  // 50% of balance
+        blockUnknownContracts: false,
         active: true
     });
 
@@ -44,8 +45,8 @@ contract PolicyStorageTest is Test {
     }
 
     function test_ScheduleUpdate_OverwritesPreviousPending() public {
-        PolicyStorage.Policy memory first = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, active: true});
-        PolicyStorage.Policy memory second = PolicyStorage.Policy({spendingThreshold: 2 ether, drainBps: 5000, active: true});
+        PolicyStorage.Policy memory first = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
+        PolicyStorage.Policy memory second = PolicyStorage.Policy({spendingThreshold: 2 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
 
         vm.startPrank(SAFE);
         store.scheduleUpdate(first);
@@ -130,8 +131,8 @@ contract PolicyStorageTest is Test {
         address safeA = address(0xAAAA);
         address safeB = address(0xBBBB);
 
-        PolicyStorage.Policy memory policyA = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, active: true});
-        PolicyStorage.Policy memory policyB = PolicyStorage.Policy({spendingThreshold: 5 ether, drainBps: 5000, active: false});
+        PolicyStorage.Policy memory policyA = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
+        PolicyStorage.Policy memory policyB = PolicyStorage.Policy({spendingThreshold: 5 ether, drainBps: 5000, blockUnknownContracts: false, active: false});
 
         vm.prank(safeA);
         store.scheduleUpdate(policyA);
@@ -153,7 +154,7 @@ contract PolicyStorageTest is Test {
     // ─── Edge cases ───────────────────────────────────────────────────────────
 
     function test_ZeroThreshold_IsValidPolicy() public {
-        PolicyStorage.Policy memory blockAll = PolicyStorage.Policy({spendingThreshold: 0, drainBps: 5000, active: true});
+        PolicyStorage.Policy memory blockAll = PolicyStorage.Policy({spendingThreshold: 0, drainBps: 5000, blockUnknownContracts: false, active: true});
 
         vm.prank(SAFE);
         store.scheduleUpdate(blockAll);
@@ -168,6 +169,7 @@ contract PolicyStorageTest is Test {
         PolicyStorage.Policy memory noLimit = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
             drainBps: 10000,  // 100% = no drain limit
+            blockUnknownContracts: false,
             active: true
         });
 
@@ -188,7 +190,7 @@ contract PolicyStorageTest is Test {
      */
     function test_Attack_CannotBypassTimelockToDisablePolicy() public {
         // Legitimate owner sets up protection
-        PolicyStorage.Policy memory protection = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, active: true});
+        PolicyStorage.Policy memory protection = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
         vm.prank(SAFE);
         store.scheduleUpdate(protection);
         vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);
@@ -199,6 +201,7 @@ contract PolicyStorageTest is Test {
         PolicyStorage.Policy memory noProtection = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
             drainBps: 10000,
+            blockUnknownContracts: false,
             active: false
         });
         vm.prank(SAFE); // attacker now has the key

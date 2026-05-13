@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {BaseTransactionGuard} from "@safe/base/GuardManager.sol";
 import {Enum} from "@safe/interfaces/Enum.sol";
 import {PolicyEngine} from "../core/PolicyEngine.sol";
+import {PolicyStorage} from "../core/PolicyStorage.sol";
 
 /**
  * @title PolicyGuard
@@ -30,6 +31,7 @@ contract PolicyGuard is BaseTransactionGuard {
 
     error PolicyViolated(bytes32 reasonCode);
     error ZeroAddressEngine();
+    error ZeroAddressStorage();
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -44,12 +46,20 @@ contract PolicyGuard is BaseTransactionGuard {
     // ─── State ────────────────────────────────────────────────────────────────
 
     PolicyEngine public immutable POLICY_ENGINE;
+    PolicyStorage public immutable POLICY_STORAGE;
+
+    /// Temporary storage for current tx context (used in Feature 3)
+    /// Maps Safe → the `to` address of the transaction being checked
+    /// Cleared after checkAfterExecution completes
+    mapping(address => address) private _currentTxTo;
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor(address _policyEngine) {
+    constructor(address _policyEngine, address _policyStorage) {
         if (_policyEngine == address(0)) revert ZeroAddressEngine();
+        if (_policyStorage == address(0)) revert ZeroAddressStorage();
         POLICY_ENGINE = PolicyEngine(_policyEngine);
+        POLICY_STORAGE = PolicyStorage(_policyStorage);
     }
 
     // ─── ITransactionGuard ────────────────────────────────────────────────────
@@ -85,15 +95,26 @@ contract PolicyGuard is BaseTransactionGuard {
             emit TransactionBlocked(msg.sender, to, value, reasonCode);
             revert PolicyViolated(reasonCode);
         }
+
+        // Feature 3: Store tx context for tracking in checkAfterExecution
+        // If this tx executes successfully, we'll mark the contract as "known"
+        _currentTxTo[msg.sender] = to;
     }
 
     /**
      * @notice Called by Safe after transaction execution.
-     *         Used in later features (rapid-tx tracking, anomaly detection).
+     *         Used for state tracking in later features.
      */
-    function checkAfterExecution(bytes32 /* hash */, bool /* success */) external override {
-        // Feature 4 (rapid-tx detection) will write state here.
-        // Writing state here (post-execution) instead of checkTransaction
-        // prevents reentrancy manipulation of in-flight counters.
+    function checkAfterExecution(bytes32 /* hash */, bool success) external override {
+        // Feature 3: Mark contract as "known" if tx executed successfully
+        // This way, next interaction with the same contract won't trigger unknown-contract warning
+        if (success) {
+            address to = _currentTxTo[msg.sender];
+            if (to != address(0)) {
+                POLICY_STORAGE.markContractKnown(to);
+            }
+        }
+        // Clear the stored address
+        delete _currentTxTo[msg.sender];
     }
 }

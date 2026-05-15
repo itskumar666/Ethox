@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {PolicyStorage} from "../../src/core/PolicyStorage.sol";
+import {PolicyEngine} from "../../src/core/PolicyEngine.sol";
+import {PolicyGuard} from "../../src/safe/PolicyGuard.sol";
 
 contract PolicyStorageTest is Test {
     PolicyStorage public store;
@@ -12,8 +14,13 @@ contract PolicyStorageTest is Test {
 
     PolicyStorage.Policy internal defaultPolicy = PolicyStorage.Policy({
         spendingThreshold: 1 ether,
-        drainBps: 5000,  // 50% of balance
+        drainBps: 5000,
         blockUnknownContracts: false,
+        monitorRiskyApprovals: false,
+        rapidTxProtectionEnabled: false,
+        rapidWindowSeconds: 0,
+        rapidMaxTxsInWindow: 0,
+        rapidLockDurationSeconds: 0,
         active: true
     });
 
@@ -45,8 +52,28 @@ contract PolicyStorageTest is Test {
     }
 
     function test_ScheduleUpdate_OverwritesPreviousPending() public {
-        PolicyStorage.Policy memory first = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
-        PolicyStorage.Policy memory second = PolicyStorage.Policy({spendingThreshold: 2 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
+        PolicyStorage.Policy memory first = PolicyStorage.Policy({
+            spendingThreshold: 1 ether,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: true
+        });
+        PolicyStorage.Policy memory second = PolicyStorage.Policy({
+            spendingThreshold: 2 ether,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: true
+        });
 
         vm.startPrank(SAFE);
         store.scheduleUpdate(first);
@@ -131,8 +158,28 @@ contract PolicyStorageTest is Test {
         address safeA = address(0xAAAA);
         address safeB = address(0xBBBB);
 
-        PolicyStorage.Policy memory policyA = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
-        PolicyStorage.Policy memory policyB = PolicyStorage.Policy({spendingThreshold: 5 ether, drainBps: 5000, blockUnknownContracts: false, active: false});
+        PolicyStorage.Policy memory policyA = PolicyStorage.Policy({
+            spendingThreshold: 1 ether,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: true
+        });
+        PolicyStorage.Policy memory policyB = PolicyStorage.Policy({
+            spendingThreshold: 5 ether,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: false
+        });
 
         vm.prank(safeA);
         store.scheduleUpdate(policyA);
@@ -154,7 +201,17 @@ contract PolicyStorageTest is Test {
     // ─── Edge cases ───────────────────────────────────────────────────────────
 
     function test_ZeroThreshold_IsValidPolicy() public {
-        PolicyStorage.Policy memory blockAll = PolicyStorage.Policy({spendingThreshold: 0, drainBps: 5000, blockUnknownContracts: false, active: true});
+        PolicyStorage.Policy memory blockAll = PolicyStorage.Policy({
+            spendingThreshold: 0,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: true
+        });
 
         vm.prank(SAFE);
         store.scheduleUpdate(blockAll);
@@ -168,8 +225,13 @@ contract PolicyStorageTest is Test {
     function test_MaxThreshold_IsValidPolicy() public {
         PolicyStorage.Policy memory noLimit = PolicyStorage.Policy({
             spendingThreshold: type(uint256).max,
-            drainBps: 10000,  // 100% = no drain limit
+            drainBps: 10000,
             blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
             active: true
         });
 
@@ -190,7 +252,17 @@ contract PolicyStorageTest is Test {
      */
     function test_Attack_CannotBypassTimelockToDisablePolicy() public {
         // Legitimate owner sets up protection
-        PolicyStorage.Policy memory protection = PolicyStorage.Policy({spendingThreshold: 1 ether, drainBps: 5000, blockUnknownContracts: false, active: true});
+        PolicyStorage.Policy memory protection = PolicyStorage.Policy({
+            spendingThreshold: 1 ether,
+            drainBps: 5000,
+            blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
+            active: true
+        });
         vm.prank(SAFE);
         store.scheduleUpdate(protection);
         vm.warp(block.timestamp + store.TIMELOCK_DURATION() + 1);
@@ -202,6 +274,11 @@ contract PolicyStorageTest is Test {
             spendingThreshold: type(uint256).max,
             drainBps: 10000,
             blockUnknownContracts: false,
+            monitorRiskyApprovals: false,
+            rapidTxProtectionEnabled: false,
+            rapidWindowSeconds: 0,
+            rapidMaxTxsInWindow: 0,
+            rapidLockDurationSeconds: 0,
             active: false
         });
         vm.prank(SAFE); // attacker now has the key
@@ -215,6 +292,27 @@ contract PolicyStorageTest is Test {
         // Policy unchanged — original protection still active
         assertEq(store.getPolicy(SAFE).spendingThreshold, 1 ether);
         assertTrue(store.getPolicy(SAFE).active);
+    }
+
+    function test_GuardAfterSuccess_RevertsIfNotGuard() public {
+        vm.expectRevert(PolicyStorage.OnlyPolicyGuard.selector);
+        store.guardAfterSuccess(SAFE, address(0x1), "");
+    }
+
+    function test_SetPolicyGuard_OnlyDeployer() public {
+        PolicyEngine eng = new PolicyEngine(address(store));
+        PolicyGuard g = new PolicyGuard(address(eng), address(store));
+        vm.prank(address(0xBAD));
+        vm.expectRevert(PolicyStorage.OnlyDeployer.selector);
+        store.setPolicyGuard(address(g));
+    }
+
+    function test_SetPolicyGuard_TwiceReverts() public {
+        PolicyEngine eng = new PolicyEngine(address(store));
+        PolicyGuard g = new PolicyGuard(address(eng), address(store));
+        store.setPolicyGuard(address(g));
+        vm.expectRevert(PolicyStorage.GuardAlreadySet.selector);
+        store.setPolicyGuard(address(g));
     }
 
     /**

@@ -8,38 +8,25 @@ import {Enum} from "@safe/interfaces/Enum.sol";
  * @title PolicyEngine
  * @notice Stateless evaluation of a transaction against a stored policy.
  *         Returns a Decision — callers (Guards, Modules) decide how to act on it.
- *
- * Keeping evaluation logic separate from storage means:
- *   - this contract can be upgraded without migrating policy data
- *   - audit surface is small and focused on logic, not storage
- *   - future features (drain %, cooldown) extend EvalContext without touching storage layout
  */
 contract PolicyEngine {
     // ─── Types ────────────────────────────────────────────────────────────────
 
     enum Decision {
-        Allow,          // proceed normally
-        Block,          // hard block — not recoverable through delay
-        RequireDelay    // user must submit via DelayModule instead
+        Allow,
+        Block,
+        RequireDelay
     }
 
-    struct EvalContext {
-        address account;        // the Safe whose policy applies
-        address to;             // transaction recipient
-        uint256 value;          // ETH value in wei
-        bytes data;             // calldata
-        Enum.Operation operation; // Call or DelegateCall
-    }
+    bytes4 private constant APPROVE_SELECTOR = 0x095ea7b3;
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
     error ZeroAddressStorage();
 
-    // ─── State ────────────────────────────────────────────────────────────────
+    // ─── State ─────────────────────────────────────────────────────────────────
 
     PolicyStorage public immutable POLICY_STORAGE;
-
-    // ─── Constructor ──────────────────────────────────────────────────────────
 
     constructor(address _policyStorage) {
         if (_policyStorage == address(0)) revert ZeroAddressStorage();
@@ -50,52 +37,72 @@ contract PolicyEngine {
 
     /**
      * @notice Evaluate a transaction context against the account's active policy.
-     * @return decision   The enforcement action required.
-     * @return reasonCode A keccak256 identifier for the violated rule (bytes32(0) if Allow).
-     *                    Used by the frontend to display a human-readable reason.
+     * @dev Flattened arguments avoid ABI edge cases with dynamic `bytes` inside structs.
      */
-    function evaluate(EvalContext calldata ctx)
-        external
-        view
-        returns (Decision decision, bytes32 reasonCode)
-    {
-        PolicyStorage.Policy memory policy = POLICY_STORAGE.getPolicy(ctx.account);
+    function evaluate(
+        address account,
+        address to,
+        uint256 value,
+        bytes calldata data,
+        Enum.Operation operation
+    ) external view returns (Decision decision, bytes32 reasonCode) {
+        PolicyStorage.Policy memory policy = POLICY_STORAGE.getPolicy(account);
 
-        // No-op when protection is inactive
         if (!policy.active) return (Decision.Allow, bytes32(0));
 
-        // DelegateCall is a privilege escalation — hard block, not just delay.
-        // A delegatecall runs in the context of the Safe itself, giving the target
-        // contract full control over Safe storage and funds.
-        if (ctx.operation == Enum.Operation.DelegateCall) {
+        if (operation == Enum.Operation.DelegateCall) {
             return (Decision.Block, keccak256("DELEGATECALL_BLOCKED"));
         }
 
-        // Feature 1: ETH spending threshold
-        // Note: ERC-20 transfers have value=0 and are NOT caught here.
-        // That is a known limitation addressed in Feature 5 (approval monitoring).
-        if (ctx.value > policy.spendingThreshold) {
+        if (policy.rapidTxProtectionEnabled) {
+            uint256 lockedUntil = POLICY_STORAGE.getRapidLockedUntil(account);
+            if (block.timestamp < lockedUntil) {
+                return (Decision.Block, keccak256("RAPID_TX_LOCKOUT"));
+            }
+        }
+
+        if (value > policy.spendingThreshold) {
             return (Decision.RequireDelay, keccak256("THRESHOLD_EXCEEDED"));
         }
 
-        // Feature 2: Wallet drain protection
-        // Check if this transaction would drain more than X% of the account's balance.
-        // drainBps is in basis points: 4000 = 40%, 5000 = 50%, 10000 = 100%.
-        // Calculation: maxAllowed = (balance * drainBps) / 10000
-        // Integer division rounds down, which is conservative (in wallet's favor).
-        uint256 balance = ctx.account.balance;
+        uint256 balance = account.balance;
         uint256 maxDrain = (balance * policy.drainBps) / 10000;
-        if (ctx.value > maxDrain) {
+        if (value > maxDrain) {
             return (Decision.RequireDelay, keccak256("DRAIN_LIMIT_EXCEEDED"));
         }
 
-        // Feature 3: Unknown contract protection
-        // If blockUnknownContracts is enabled, check if we've seen this contract before.
-        // First interaction with a new contract requires delay/confirmation.
-        if (policy.blockUnknownContracts && !POLICY_STORAGE.isContractKnown(ctx.account, ctx.to)) {
-            return (Decision.RequireDelay, keccak256("UNKNOWN_CONTRACT"));
+        if (policy.monitorRiskyApprovals && to.code.length > 0) {
+            (bool isApprove, address spender, uint256 amount) = _decodeApprove(data);
+            if (isApprove && _isInfiniteApproval(amount)) {
+                if (!POLICY_STORAGE.isContractKnown(account, spender)) {
+                    return (Decision.RequireDelay, keccak256("RISKY_APPROVAL_UNKNOWN_SPENDER"));
+                }
+            }
+        }
+
+        if (policy.blockUnknownContracts && to.code.length > 0) {
+            if (!POLICY_STORAGE.isContractKnown(account, to)) {
+                return (Decision.RequireDelay, keccak256("UNKNOWN_CONTRACT"));
+            }
         }
 
         return (Decision.Allow, bytes32(0));
+    }
+
+    function _decodeApprove(bytes calldata data)
+        private
+        pure
+        returns (bool ok, address spender, uint256 amount)
+    {
+        if (data.length < 68) return (false, address(0), 0);
+        bytes4 sig = bytes4(data[0:4]);
+        if (sig != APPROVE_SELECTOR) return (false, address(0), 0);
+        spender = address(uint160(bytes20(data[16:36])));
+        amount = uint256(bytes32(data[36:68]));
+        return (true, spender, amount);
+    }
+
+    function _isInfiniteApproval(uint256 amount) private pure returns (bool) {
+        return amount == type(uint256).max;
     }
 }
